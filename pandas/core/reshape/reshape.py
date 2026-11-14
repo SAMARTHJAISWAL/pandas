@@ -152,8 +152,9 @@ class _Unstacker:
                 unique_codes = unique_codes[~nan_mask]
                 self.unique_nan_index = np.flatnonzero(nan_mask)[0]
 
+            # unique_codes index the pruned level, not removed_level_full, which
+            #  keeps its unused entries and its order (GH#64150)
             self.removed_level = self.removed_level.take(unique_codes)
-            self.removed_level_full = self.removed_level_full.take(unique_codes)
         elif any(lev.hasnans for lev in self.index.levels):
             # remove_unused_levels returns the index unpruned when a level holds
             #  NaN as a value (GH#37510) -- and only then -- so the unstacked
@@ -441,25 +442,20 @@ class _Unstacker:
 
     @cache_readonly
     def _repeater(self) -> np.ndarray:
-        # The two indices differ only if the unstacked level had unused items:
-        if len(self.removed_level_full) != len(self.removed_level):
-            # In this case, we remap the new codes to the original level:
-            repeater = self.removed_level_full.get_indexer(self.removed_level)
-            if self.has_nan:
-                # insert nan index at first position
-                repeater = np.insert(repeater, 0, -1)
+        # Position in removed_level_full of each column of the unstacked level
+        if self.sort and len(self.removed_level_full) == len(self.removed_level):
+            # Nothing was dropped, so each level item is used exactly once:
+            repeater = np.arange(len(self.removed_level))
         else:
-            # Otherwise, we just use each level item exactly once:
-            stride = len(self.removed_level) + self.has_nan
-            repeater = np.arange(stride) - self.lift
-            if self.has_nan and not self.sort:
-                assert self.unique_nan_index > -1, (
-                    "`unique_nan_index` not properly initialized"
-                )
-                # assign -1 where should be nan according to the unique values.
-                repeater[self.unique_nan_index] = -1
-                # compensate for the removed index level
-                repeater[self.unique_nan_index + 1 :] -= 1
+            # removed_level has no unused items, and with sort=False it is in
+            #  order of first appearance, so remap to the original level:
+            repeater = self.removed_level_full.get_indexer(self.removed_level)
+
+        if self.has_nan:
+            # NaN is not in the level: it gets the first column when sorting,
+            #  otherwise the column where it first appeared.
+            nan_index = 0 if self.sort else self.unique_nan_index
+            repeater = np.insert(repeater, nan_index, -1)
 
         return repeater
 

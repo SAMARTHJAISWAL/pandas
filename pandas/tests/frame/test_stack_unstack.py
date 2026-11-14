@@ -1408,6 +1408,77 @@ def test_unstack_sort_false(frame_or_series, dtype):
     tm.assert_frame_equal(result, expected)
 
 
+@pytest.mark.parametrize("sort", [True, False])
+def test_unstack_unused_levels_column_labels(frame_or_series, sort):
+    # GH#64150
+    index = pd.MultiIndex.from_product(
+        [["a", "b", "c"], ["M01", "M02"]], names=["series", "period"]
+    )
+    obj = frame_or_series(np.arange(6, dtype=np.int64), index=index)
+    # "a" is left as an unused level
+    obj = obj.loc[["b", "c"]]
+
+    result = obj.unstack(level="series", sort=sort)
+
+    if frame_or_series is pd.DataFrame:
+        expected_columns = pd.MultiIndex.from_product(
+            [[0], ["b", "c"]], names=[None, "series"]
+        )
+    else:
+        expected_columns = pd.Index(["b", "c"], name="series")
+    expected = pd.DataFrame(
+        [[2, 4], [3, 5]],
+        index=pd.Index(["M01", "M02"], name="period"),
+        columns=expected_columns,
+    )
+    tm.assert_frame_equal(result, expected)
+    if frame_or_series is pd.DataFrame:
+        # the unused "a" stays in the level, whatever the value of sort
+        tm.assert_index_equal(result.columns.levels[1], index.levels[0])
+
+
+def test_unstack_sort_false_unused_levels_order():
+    # GH#64150
+    index = pd.MultiIndex.from_product(
+        [["a", "b", "c"], ["M01", "M02"]], names=["series", "period"]
+    )
+    df = pd.DataFrame({"value": np.arange(6, dtype=np.int64)}, index=index)
+    # "c" comes first, and "a" is left as an unused level
+    df = df.loc[["c", "b"]]
+
+    result = df.unstack(level="series", sort=False)
+
+    expected = pd.DataFrame(
+        [[4, 2], [5, 3]],
+        index=pd.Index(["M01", "M02"], name="period"),
+        columns=pd.MultiIndex.from_product(
+            [["value"], ["c", "b"]], names=[None, "series"]
+        ),
+    )
+    tm.assert_frame_equal(result, expected)
+
+
+def test_unstack_sort_false_unused_levels_nan():
+    # GH#64150
+    index = pd.MultiIndex.from_arrays(
+        [["a", "c", np.nan, "b"], ["M01"] * 4], names=["series", "period"]
+    )
+    df = pd.DataFrame({"value": np.arange(4, dtype=np.int64)}, index=index)
+    # "a" is left as an unused level
+    df = df.iloc[1:]
+
+    result = df.unstack(level="series", sort=False)
+
+    expected = pd.DataFrame(
+        [[1, 2, 3]],
+        index=pd.Index(["M01"], name="period"),
+        columns=pd.MultiIndex.from_product(
+            [["value"], ["c", np.nan, "b"]], names=[None, "series"]
+        ),
+    )
+    tm.assert_frame_equal(result, expected)
+
+
 @pytest.mark.parametrize(
     "levels2, expected_columns",
     [
